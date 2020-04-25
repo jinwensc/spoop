@@ -23,7 +23,7 @@ class Spoop extends Logging {
   var executors: ExecutorService = _
 
   /**
-   * 具体计算逻辑
+   * 数据抽取
    */
   def runImport(dbNum: String, tables: Array[String]): Unit = {
     //获取表配置信息
@@ -61,7 +61,7 @@ class Spoop extends Logging {
   }
 
   /**
-   * spark初始化开发环境
+   * spark初始化开发环境，不可用于生产环境
    *
    * @param conf
    */
@@ -137,6 +137,11 @@ object Spoop {
   var etl_insert_date = format.format(new java.util.Date())
   var date: String = _
 
+  /**
+   * spoop程序入口
+   *
+   * @param args 参数：-m import -db_num 103_01 -tables S_OMS_USERS -date 20200423
+   */
   def main(args: Array[String]): Unit = {
     val command = CommandUtil.parse(args)
     val mode: String = command.getOptionValue("m")
