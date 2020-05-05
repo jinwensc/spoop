@@ -16,9 +16,9 @@ trait CatalogService {
   def getName(): String;
 
   /**
-   * 获取DataFrameReader
+   * 获取源数据dataframe
    *
-   * @return DataFrameReader
+   * @return DataFrame
    */
   def source(spark: SparkSession, tableInfo: Row): DataFrame;
 

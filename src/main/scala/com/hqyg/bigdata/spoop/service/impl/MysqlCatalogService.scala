@@ -23,9 +23,9 @@ class MysqlCatalogService extends CatalogService with Logging {
   override def getName(): String = MysqlCatalogService.name
 
   /**
-   * 获取DataFrameReader
+   * 获取源数据dataframe
    *
-   * @return DataFrameReader
+   * @return DataFrame
    */
   override def source(spark: SparkSession,
                       tableInfo: Row
@@ -44,8 +44,8 @@ class MysqlCatalogService extends CatalogService with Logging {
     val updateCol = tableInfo.getAs[String]("UPDATE_COL")
     val colConcatSqoop = tableInfo.getAs[String]("COL_CONCAT_SQOOP")
     logError(s"colConcatSqoop:${colConcatSqoop}")
-    //    val mapNum = tableInfo.getAs[java.math.BigDecimal]("MAP_NUM").toString.toInt
-    val mapNum = 10
+    val mapNum = tableInfo.getAs[java.math.BigDecimal]("MAP_NUM").toString.toInt
+    //    val mapNum = 10
 
     var tableSql: String = null
     var whereConditions: Array[String] = null
