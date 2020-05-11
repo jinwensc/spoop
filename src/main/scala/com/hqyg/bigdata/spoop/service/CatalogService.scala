@@ -13,14 +13,14 @@ trait CatalogService {
    *
    * @return 名称
    */
-  def getName(): String;
+  def getName(): String
 
   /**
    * 获取源数据dataframe
    *
    * @return DataFrame
    */
-  def source(spark: SparkSession, tableInfo: Row): DataFrame;
+  def source(spark: SparkSession, tableInfo: Row): DataFrame
 
 
   //  def sink(spark: SparkSession, tableLoadType: Integer, updateCol: String, dbName: String, tableName: String, partitionKey: String, dbIp: String, dbPort: String, dbUser: String, dbPwd: String): DataFrame;

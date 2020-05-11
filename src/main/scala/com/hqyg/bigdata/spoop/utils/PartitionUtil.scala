@@ -19,9 +19,9 @@ object PartitionUtil {
       val min = r._1
       val max = r._2
       if (max == rangeMax) {
-        s"`${keyCol}` >= ${min} and `${keyCol}` <= ${max}"
+        s"${keyCol} >= ${min} and ${keyCol} <= ${max}"
       } else {
-        s"`${keyCol}` >= ${min} and `${keyCol}` <  ${max}"
+        s"${keyCol} >= ${min} and ${keyCol} <  ${max}"
       }
     }).toArray
     predicates
@@ -46,9 +46,9 @@ object PartitionUtil {
       val min = r._1
       val max = r._2
       if (max == rangeMax) {
-        s"`${keyCol}` >= ${min} and `${keyCol}` <= ${max}"
+        s"${keyCol} >= ${min} and ${keyCol} <= ${max}"
       } else {
-        s"`${keyCol}` >= ${min} and `${keyCol}` <  ${max}"
+        s"${keyCol} >= ${min} and ${keyCol} <  ${max}"
       }
     }).toArray
     predicates

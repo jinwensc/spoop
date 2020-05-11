@@ -4,9 +4,11 @@ import java.util.Properties
 
 import com.hqyg.bigdata.spoop.Spoop
 import com.hqyg.bigdata.spoop.service.CatalogService
-import com.hqyg.bigdata.spoop.utils.{DateUtil, PartitionUtil}
+import com.hqyg.bigdata.spoop.utils.{DateUtil, PartitionUtil, PropsUtil}
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.{DataFrame, Row, SparkSession}
+
+import scala.collection.mutable.ListBuffer
 
 /**
  * mysql 数据库的处理类实现
@@ -45,26 +47,42 @@ class MysqlCatalogService extends CatalogService with Logging {
     val colConcatSqoop = tableInfo.getAs[String]("COL_CONCAT_SQOOP")
     logError(s"colConcatSqoop:${colConcatSqoop}")
     val mapNum = tableInfo.getAs[java.math.BigDecimal]("MAP_NUM").toString.toInt
+    val maxSampleCount = PropsUtil.getInt("tring-key-col.max-sample-count")
+    val minSampleCount = PropsUtil.getInt("tring-key-col.min-sample-count")
+    val maxPartition = PropsUtil.getInt("partition.max")
     //    val mapNum = 10
 
     var tableSql: String = null
+    var rangeSql: String = null
+    var sampleSql: String = null
     var whereConditions: Array[String] = null
-
     val lastDay = DateUtil.get_inc_start_last(Spoop.date)
+
+    //计算采样的数量
+    var sampleCount: Int = maxSampleCount
+    if (mapNum < maxPartition) {
+      sampleCount = mapNum * (maxSampleCount / maxPartition)
+    }
+    if (sampleCount < minSampleCount) sampleCount = minSampleCount
 
     //生成拉取数据的sql
     if (tableLoadType == 0) {
       //全量，拉取素有数据
       tableSql = s"(select ${colConcatSqoop} from ${fromTable}) t"
+      rangeSql = s"(select min(${keyCol}) as min, max(${keyCol}) as max from ${fromTable}) t"
+      sampleSql = s"(select ${keyCol} from ${fromTable} order by rand() limit ${sampleCount}) t"
     } else {
       //增量，根据时间来获取部分数据
-      tableSql = s"(select ${colConcatSqoop} from ${fromTable} where ${updateCol}>'${lastDay.substring(0, 4)}-${lastDay.substring(4, 6)}-${lastDay.substring(6, 8)} 23:00:00' and ${updateCol} <= '${Spoop.date.substring(0, 4)}-${Spoop.date.substring(4, 6)}-${Spoop.date.substring(6, 8)} 23:59:59') t"
+      val startTime = s"${lastDay.substring(0, 4)}-${lastDay.substring(4, 6)}-${lastDay.substring(6, 8)} 23:00:00"
+      val endTime = s"${Spoop.date.substring(0, 4)}-${Spoop.date.substring(4, 6)}-${Spoop.date.substring(6, 8)} 23:59:59"
+      tableSql = s"(select ${colConcatSqoop} from ${fromTable} where ${updateCol}>'${startTime}' and ${updateCol} <= '${endTime}') t"
+      rangeSql = s"(select min(${keyCol}) as min, max(${keyCol}) as max from ${fromTable} where ${updateCol}>'${startTime}' and ${updateCol} <= '${endTime}') t"
+      sampleSql = s"(select ${keyCol} as key_col from ${fromTable} where ${updateCol}>'${startTime}' and ${updateCol} <= '${endTime}' order by rand() limit ${sampleCount}) t"
     }
     logWarning(s"@@tableSql ${tableSql}")
 
     if (mapNum > 1) {
       //分区数大于1时，计算分区规则，通过最大最小值来平衡分区的数据量，可能数据倾斜，可增加分区数来解决
-      val rangeSql = s"(select min(${keyCol}) as min, max(${keyCol}) as max from ${fromTable}) t"
       val range = spark.read.format("jdbc")
         .option("driver", DRIVER)
         .option("url", s"jdbc:${sourceType}://${dbIp}:${dbPort}/${dbName}?useSSL=false")
@@ -73,6 +91,7 @@ class MysqlCatalogService extends CatalogService with Logging {
         .option("dbtable", rangeSql)
         .option("numPartitions", "1").load()
         .collect().map(r => (r.get(0), r.get(1))).toList(0)
+      //根据分区字段的类型，来计算各个分区的范围
       range._1 match {
         case i: Number => {
           whereConditions = PartitionUtil.getNumberPredicates(keyCol, scala.math.floor(i.doubleValue()).toLong, scala.math.ceil(range._2.asInstanceOf[Number].doubleValue()).toLong, mapNum)
@@ -81,11 +100,34 @@ class MysqlCatalogService extends CatalogService with Logging {
           whereConditions = PartitionUtil.getDecimalPredicates(keyCol, b, range._2.asInstanceOf[java.math.BigDecimal], mapNum)
         }
         case s: String => {
-          //TODO string
+          //先进行采样
+          spark.read.format("jdbc")
+            .option("driver", DRIVER)
+            .option("url", s"jdbc:${sourceType}://${dbIp}:${dbPort}/${dbName}?useSSL=false")
+            .option("user", dbUser)
+            .option("password", dbPwd)
+            .option("dbtable", sampleSql)
+            .option("numPartitions", "1").load().createOrReplaceTempView(s"${fromTable}_sample")
+          //采样结果排序
+          val sampleWithId = spark.sql(s"select key_col,row_number() over(partition by 1 order  by key_col) as row_num from ${fromTable}_sample")
+          val step: Int = sampleCount / mapNum
+          val whereConditionsList = ListBuffer[String]()
+          //采样结果获取平均分隔点
+          val keyColArray: Array[String] = sampleWithId.where(s"pmod(row_num, ${mapNum}) = pmod(t.row_num,${mapNum})=cast(${step} as bigint)/2").select("key_col").collect()
+            .map(_.getAs[String]("key_col"))
+
+          //构造whereConditions
+          keyColArray.reduce((a, b) => {
+            whereConditionsList.append(s"${keyCol} >= ${a} and ${keyCol} < ${b}")
+          })
+          whereConditionsList.append(s"${keyCol} >= ${range._1} and ${keyCol} < ${keyColArray(0)}")
+          whereConditionsList.append(s"${keyCol} >= ${keyColArray.last} and ${keyCol} <= ${range._2}")
+          whereConditions = whereConditionsList.toArray
+
         }
       }
 
-      logWarning(s"@@ranger ${whereConditions.toBuffer}")
+      logWarning(s"@@predicates: ${whereConditions.toBuffer}")
 
       //根据分区规则，拉取数据
       val properties = new Properties()
