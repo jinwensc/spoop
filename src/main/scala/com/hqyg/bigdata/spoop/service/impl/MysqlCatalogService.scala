@@ -26,6 +26,9 @@ class MysqlCatalogService extends CatalogService with Logging {
 
   /**
    * 获取源数据dataframe
+   * 如果并行度大于1，需要按照某个字段分区
+   * 如果分区字段是数值，根据最大最小值和分区数，平均的计算每个分区的数值范围
+   * 如果是字符串，根据最大最小值和抽样获取的分区字段值来计算出分区的范围，需要多进行一次抽样数据的拉取过程
    *
    * @return DataFrame
    */
@@ -125,6 +128,8 @@ class MysqlCatalogService extends CatalogService with Logging {
           whereConditions = whereConditionsList.toArray
 
         }
+
+        //TODO 分区字段是时间的话，转换为时间戳，安装数值的方式
       }
 
       logWarning(s"@@predicates: ${whereConditions.toBuffer}")
